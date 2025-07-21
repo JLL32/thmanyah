@@ -1,2 +1,2 @@
 DROP TABLE IF EXISTS videos;
-DROP TYPE IF EXISTS video_type;
+DROP TYPE IF EXISTS video_type CASCADE;
