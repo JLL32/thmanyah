@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/JLL32/thmanyah/internal/data"
@@ -84,11 +85,111 @@ func (app *application) showVideoHandler(w http.ResponseWriter, r *http.Request)
 }
 
 func (app *application) updateVideoHandler(w http.ResponseWriter, r *http.Request) {
-	// Implement the updatevideoHandler function
+	id, err := app.readIDParam(r)
+	if err != nil {
+		app.notFoundResponse(w, r)
+		return
+	}
+
+	video, err := app.models.Videos.Get(id)
+	if err != nil {
+		switch {
+		case errors.Is(err, data.ErrRecordNotFound):
+			app.notFoundResponse(w, r)
+		default:
+			app.serverErrorResponse(w, r, err)
+		}
+		return
+	}
+
+	if version := r.Header.Get("X-Expected-Version"); version != "" {
+		if strconv.Itoa(int(video.Version)) != version {
+			app.editConflictResponse(w, r)
+			return
+		}
+	}
+
+	var input struct {
+		Title *string `json:"title"`
+		Description *string `json:"description"`
+		Type *string `json:"type"`
+		Length *int `json:"length"`
+		Language *string `json:"language"`
+		PublishedAt *time.Time `json:"published_at"`
+	}
+
+	err = app.readJSON(w, r, &input)
+	if err != nil {
+		app.badRequestResponse(w, r, err)
+		return
+	}
+
+	if input.Title != nil {
+		video.Title = *input.Title
+	}
+	if input.Description != nil {
+		video.Description = *input.Description
+	}
+	if input.Type != nil {
+		video.Type = *input.Type
+	}
+	if input.Length != nil {
+		video.Length = *input.Length
+	}
+	if input.Language != nil {
+		video.Language = *input.Language
+	}
+	if input.PublishedAt != nil {
+		video.PublishedAt = *input.PublishedAt
+	}
+
+	v := validator.New()
+	if data.ValidateVideo(v, video); !v.Valid() {
+		app.failedValidationResponse(w, r, v.Errors)
+		return
+	}
+
+	err = app.models.Videos.Update(video)
+	if err != nil {
+		switch {
+		case errors.Is(err, data.ErrEditConflict):
+			app.editConflictResponse(w, r)
+		default:
+			app.serverErrorResponse(w, r, err)
+		}
+		return
+	}
+
+	err = app.writeJSON(w, http.StatusOK, envelope{"video": video}, nil)
+	if err != nil {
+		app.serverErrorResponse(w, r, err)
+		return
+	}
 }
 
 func (app *application) deleteVideoHandler(w http.ResponseWriter, r *http.Request) {
-	// Implement the deletevideoHandler function
+	id, err := app.readIDParam(r)
+	if err != nil {
+		app.notFoundResponse(w, r)
+		return
+	}
+
+	err = app.models.Videos.Delete(id)
+	if err != nil {
+		if errors.Is(err, data.ErrRecordNotFound) {
+			app.notFoundResponse(w, r)
+			return
+		}
+
+		app.serverErrorResponse(w, r, err)
+		return
+	}
+
+	err = app.writeJSON(w, http.StatusOK, envelope{"message": "video successfully deleted"}, nil)
+	if err != nil {
+		app.serverErrorResponse(w, r, err)
+		return
+	}
 }
 
 func (app *application) listVideosHandler(w http.ResponseWriter, r *http.Request) {

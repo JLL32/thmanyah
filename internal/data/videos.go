@@ -42,7 +42,7 @@ type VideoModel struct {
 	DB *sql.DB
 }
 
-func (m VideoModel) Insert(video *Video) error {
+func (v VideoModel) Insert(video *Video) error {
 	query := `INSERT INTO videos (video_id, title, description, type, length, language, published_at)
 	VALUES ($1, $2, $3, $4, $5, $6, $7)
 	RETURNING video_id, created_at, version`
@@ -52,10 +52,10 @@ func (m VideoModel) Insert(video *Video) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 
-	return m.DB.QueryRowContext(ctx, query, args...).Scan(&video.VideoID, &video.CreatedAt, &video.Version)
+	return v.DB.QueryRowContext(ctx, query, args...).Scan(&video.VideoID, &video.CreatedAt, &video.Version)
 }
 
-func (m VideoModel) Get(id string) (*Video, error) {
+func (v VideoModel) Get(id string) (*Video, error) {
 	if id == "" {
 		return nil, ErrRecordNotFound
 	}
@@ -71,7 +71,7 @@ func (m VideoModel) Get(id string) (*Video, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 
-	err := m.DB.QueryRowContext(ctx, query, id).Scan(
+	err := v.DB.QueryRowContext(ctx, query, id).Scan(
 		&video.VideoID,
 		&video.Title,
 		&video.Description,
@@ -93,4 +93,67 @@ func (m VideoModel) Get(id string) (*Video, error) {
 	}
 
 	return &video, nil
+}
+
+func (v VideoModel) Update(video *Video) error {
+	query := `
+	UPDATE videos
+	SET title = $1, description = $2, type = $3, length = $4, language = $5, published_at = $6, version = version + 1
+	WHERE video_id = $8 AND version = $7
+	RETURNING version`
+
+	args := []any{
+		video.Title,
+		video.Description,
+		video.Type,
+		video.Length,
+		video.Language,
+		video.PublishedAt,
+		video.Version,
+		video.VideoID,
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	err := v.DB.QueryRowContext(ctx, query, args...).Scan(&video.Version)
+	if err != nil {
+		switch {
+		case errors.Is(err, sql.ErrNoRows):
+			return ErrEditConflict
+		default:
+			return err
+		}
+	}
+
+	return nil
+}
+
+func (v VideoModel) Delete(id string) error {
+	if id == "" {
+		return ErrRecordNotFound
+	}
+
+	query := `
+		DELETE FROM videos
+		WHERE video_id = $1`
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	result, err := v.DB.ExecContext(ctx, query, id)
+	if err != nil {
+		return err
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+
+	if rowsAffected == 0 {
+		return ErrRecordNotFound
+	}
+
+	return nil
 }
