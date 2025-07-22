@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/JLL32/thmanyah/internal/validator"
@@ -156,4 +157,58 @@ func (v VideoModel) Delete(id string) error {
 	}
 
 	return nil
+}
+
+func (v VideoModel) GetAll(title string, description string, filters Filters) ([]*Video, Metadata, error) {
+	query := fmt.Sprintf(`
+		SELECT count(*) OVER(),  video_id, title, description, type, length, language, published_at, created_at, version
+		FROM videos
+		WHERE (to_tsvector('simple', title) @@ plainto_tsquery('simple', $1) OR $1 = '')
+		AND (to_tsvector('simple', description) @@ plainto_tsquery('simple', $2) OR $2 = '')
+		ORDER BY %s %s
+		LIMIT $3 OFFSET $4`, filters.sortColumn(), filters.sortDirection())
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	args := []any{title, description, filters.limit(), filters.offset()}
+
+	rows, err := v.DB.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, Metadata{}, err
+	}
+
+	defer rows.Close()
+
+	totalRecords := 0
+	videos := []*Video{}
+
+	for rows.Next() {
+		var video Video
+
+		err := rows.Scan(
+			&totalRecords,
+			&video.VideoID,
+			&video.Title,
+			&video.Description,
+			&video.Type,
+			&video.Length,
+			&video.Language,
+			&video.PublishedAt,
+			&video.CreatedAt,
+			&video.Version,
+		)
+		if err != nil {
+			return nil, Metadata{}, err
+		}
+
+		videos = append(videos, &video)
+	}
+
+	if err = rows.Err(); err != nil {
+		return nil, Metadata{}, err
+	}
+
+	metadata := calculateMetaData(totalRecords, filters.Page, filters.PageSize)
+	return videos, metadata, nil
 }

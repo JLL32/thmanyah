@@ -193,5 +193,37 @@ func (app *application) deleteVideoHandler(w http.ResponseWriter, r *http.Reques
 }
 
 func (app *application) listVideosHandler(w http.ResponseWriter, r *http.Request) {
-	// Implement the listVideosHandler function
+	var input struct {
+		Title  string
+		Description string
+		data.Filters
+	}
+
+	v := validator.New()
+
+	qs := r.URL.Query()
+
+	input.Title = app.readString(qs, "title", "")
+	input.Description =  app.readString(qs, "description", "")
+	input.Filters.Page = app.readInt(qs, "page", 1, v)
+	input.Filters.PageSize = app.readInt(qs, "page_size", 20, v)
+	input.Filters.Sort = app.readString(qs, "sort", "id")
+	input.Filters.SortSafelist = []string{"video_id", "title", "description", "length", "type", "-video_id", "-title", "-description", "-length", "-type"}
+
+	if data.ValidateFilters(v, input.Filters); !v.Valid() {
+		app.failedValidationResponse(w, r, v.Errors)
+		return
+	}
+
+	videos, metadata, err := app.models.Videos.GetAll(input.Title, input.Description, input.Filters)
+	if err != nil {
+		app.serverErrorResponse(w, r, err)
+		return
+	}
+
+	err = app.writeJSON(w, http.StatusOK, envelope{"metadata": metadata, "videos": videos}, nil)
+	if err != nil {
+		app.serverErrorResponse(w, r, err)
+		return
+	}
 }
